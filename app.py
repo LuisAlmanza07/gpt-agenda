@@ -15,9 +15,8 @@ creds = None
 if os.path.exists('token.json'):
     creds = Credentials.from_authorized_user_file('token.json', SCOPES)
 else:
-    flow = InstalledAppFlow.from_client_secrets_file(
-        'credentials.json', SCOPES)
-    creds = flow.run_local_server(port=0)  # Corre en un puerto disponible
+    flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+    creds = flow.run_local_server(port=5001)  # Usa puerto 5001
     with open('token.json', 'w') as token:
         token.write(creds.to_json())
 
@@ -57,10 +56,10 @@ def crear_evento():
         }
 
         event = service.events().insert(calendarId='primary', body=event).execute()
-        return f"✅ Evento creado: {event.get('htmlLink')}"
+        return f"✅ Evento creado: <a href='{event.get('htmlLink')}' target='_blank'>Ver en Google Calendar</a>"
 
     return render_template_string(formulario_html)
 
-# CORRE FLASK EN PUERTO DIFERENTE
+# Ejecutar servidor Flask
 if __name__ == '__main__':
-    app.run(port=5001, debug=True)  # <- Cambiado a puerto 5001
+    app.run(port=5001, debug=True)
