@@ -4,8 +4,20 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import os
+import base64
 
 app = Flask(__name__)
+
+# 🔐 Crear archivos desde variables de entorno (Render)
+credentials_b64 = os.getenv("CREDENTIALS_JSON_B64")
+if credentials_b64:
+    with open("credentials.json", "wb") as f:
+        f.write(base64.b64decode(credentials_b64))
+
+token_b64 = os.getenv("TOKEN_JSON_B64")
+if token_b64:
+    with open("token.json", "wb") as f:
+        f.write(base64.b64decode(token_b64))
 
 # SCOPES
 SCOPES = ['https://www.googleapis.com/auth/calendar']
@@ -16,7 +28,7 @@ if os.path.exists('token.json'):
     creds = Credentials.from_authorized_user_file('token.json', SCOPES)
 else:
     flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-    creds = flow.run_local_server(port=5001)  # Usa puerto 5001
+    creds = flow.run_local_server(port=5001)
     with open('token.json', 'w') as token:
         token.write(creds.to_json())
 
@@ -60,6 +72,6 @@ def crear_evento():
 
     return render_template_string(formulario_html)
 
-# Ejecutar servidor Flask
+# Ejecutar servidor Flask (modo local solo si es necesario)
 if __name__ == '__main__':
     app.run(port=5001, debug=True)
