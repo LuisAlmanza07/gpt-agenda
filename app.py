@@ -132,6 +132,13 @@ def sugerir_horario():
 
     return jsonify({"mensaje": "No hay bloques disponibles en las próximas 24h"})
 
+# 6. Servir el archivo openapi.yaml
+@app.route('/openapi.yaml')
+def openapi():
+    with open('openapi.yaml', 'r') as f:
+        content = f.read()
+    return render_template_string(content), 200, {'Content-Type': 'text/yaml'}
+
 # Ejecutar local
 if __name__ == '__main__':
     app.run(port=5001, debug=True)
