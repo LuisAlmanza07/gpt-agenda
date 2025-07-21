@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, render_template_string
+from flask import Flask, request, jsonify, render_template_string
 from datetime import datetime
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -72,6 +72,59 @@ def crear_evento():
 
     return render_template_string(formulario_html)
 
-# Ejecutar servidor Flask (modo local solo si es necesario)
+# ENDPOINT API PARA GPT
+@app.route('/api/crear_evento', methods=['POST'])
+def api_crear_evento():
+    data = request.get_json()
+    summary = data.get('summary')
+    start = data.get('start')
+    end = data.get('end')
+
+    try:
+        event = {
+            'summary': summary,
+            'start': {'dateTime': start, 'timeZone': 'America/Panama'},
+            'end': {'dateTime': end, 'timeZone': 'America/Panama'}
+        }
+        event = service.events().insert(calendarId='primary', body=event).execute()
+        return jsonify({'message': 'Evento creado', 'link': event.get('htmlLink')}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/eventos', methods=['GET'])
+def api_eventos():
+    start = request.args.get('start')  # ISO 8601
+    end = request.args.get('end')
+
+    events_result = service.events().list(
+        calendarId='primary',
+        timeMin=start,
+        timeMax=end,
+        singleEvents=True,
+        orderBy='startTime'
+    ).execute()
+
+    return jsonify(events_result.get('items', [])), 200
+
+@app.route('/api/conflicto', methods=['POST'])
+def api_conflicto():
+    data = request.get_json()
+    start = data.get('start')
+    end = data.get('end')
+
+    events_result = service.events().list(
+        calendarId='primary',
+        timeMin=start,
+        timeMax=end,
+        singleEvents=True,
+        orderBy='startTime'
+    ).execute()
+
+    conflictos = events_result.get('items', [])
+    if conflictos:
+        return jsonify({'conflict': True, 'events': conflictos}), 200
+    return jsonify({'conflict': False}), 200
+
+# Ejecutar servidor Flask (solo en local)
 if __name__ == '__main__':
     app.run(port=5001, debug=True)
