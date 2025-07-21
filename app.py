@@ -51,9 +51,11 @@ def crear_evento():
 # 2. Leer agenda
 @app.route('/leer_agenda', methods=['GET'])
 def leer_agenda():
+    import pytz
     rango = request.args.get('rango')  # diario, semanal, mensual
-    ahora = datetime.utcnow()
-    
+    zona = pytz.timezone('America/Panama')
+    ahora = datetime.now(zona)
+
     if rango == "diario":
         inicio = ahora
         fin = ahora + timedelta(days=1)
@@ -68,19 +70,23 @@ def leer_agenda():
 
     eventos = service.events().list(
         calendarId='primary',
-        timeMin=inicio.isoformat() + 'Z',
-        timeMax=fin.isoformat() + 'Z',
+        timeMin=inicio.isoformat(),
+        timeMax=fin.isoformat(),
         singleEvents=True,
         orderBy='startTime'
     ).execute().get('items', [])
 
     resultado = []
     for evento in eventos:
+        # Detectar si el evento tiene dateTime o solo date
+        inicio_evento = evento['start'].get('dateTime') or evento['start'].get('date')
+        fin_evento = evento['end'].get('dateTime') or evento['end'].get('date')
+
         resultado.append({
             "id": evento['id'],
             "titulo": evento.get('summary', 'Sin título'),
-            "inicio": evento['start'].get('dateTime'),
-            "fin": evento['end'].get('dateTime'),
+            "inicio": inicio_evento,
+            "fin": fin_evento,
         })
 
     return jsonify(resultado)
