@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template_string
-from datetime import datetime
+from datetime import datetime, timedelta
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
@@ -8,7 +8,7 @@ import base64
 
 app = Flask(__name__)
 
-# 🔐 Crear archivos desde variables de entorno (Render)
+# Cargar archivos desde entorno (Render)
 credentials_b64 = os.getenv("CREDENTIALS_JSON_B64")
 if credentials_b64:
     with open("credentials.json", "wb") as f:
@@ -19,112 +19,119 @@ if token_b64:
     with open("token.json", "wb") as f:
         f.write(base64.b64decode(token_b64))
 
-# SCOPES
+# Autenticación
 SCOPES = ['https://www.googleapis.com/auth/calendar']
-
-# Token y credenciales
-creds = None
-if os.path.exists('token.json'):
-    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-else:
-    flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-    creds = flow.run_local_server(port=5001)
-    with open('token.json', 'w') as token:
-        token.write(creds.to_json())
-
-# Servicio de Google Calendar
+creds = Credentials.from_authorized_user_file('token.json', SCOPES)
 service = build('calendar', 'v3', credentials=creds)
 
-# HTML del formulario
-formulario_html = '''
-<!doctype html>
-<title>Crear Evento</title>
-<h1>Crear Evento en Google Calendar</h1>
-<form method="POST">
-  Título: <input type="text" name="summary"><br>
-  Fecha inicio (YYYY-MM-DD HH:MM): <input type="text" name="start"><br>
-  Fecha fin (YYYY-MM-DD HH:MM): <input type="text" name="end"><br>
-  <input type="submit" value="Crear">
-</form>
-'''
+@app.route('/')
+def home():
+    return '🗓️ API Agenda activa.'
 
-@app.route('/crear_evento', methods=['GET', 'POST'])
+# 1. Crear evento
+@app.route('/crear_evento', methods=['POST'])
 def crear_evento():
-    if request.method == 'POST':
-        summary = request.form['summary']
-        start = request.form['start']
-        end = request.form['end']
+    data = request.json
+    summary = data['summary']
+    start = datetime.strptime(data['start'], "%Y-%m-%d %H:%M")
+    end = datetime.strptime(data['end'], "%Y-%m-%d %H:%M")
 
-        event = {
-            'summary': summary,
-            'start': {
-                'dateTime': datetime.strptime(start, "%Y-%m-%d %H:%M").isoformat(),
-                'timeZone': 'America/Panama',
-            },
-            'end': {
-                'dateTime': datetime.strptime(end, "%Y-%m-%d %H:%M").isoformat(),
-                'timeZone': 'America/Panama',
-            },
-        }
+    event = {
+        'summary': summary,
+        'start': {'dateTime': start.isoformat(), 'timeZone': 'America/Panama'},
+        'end': {'dateTime': end.isoformat(), 'timeZone': 'America/Panama'}
+    }
 
-        event = service.events().insert(calendarId='primary', body=event).execute()
-        return f"✅ Evento creado: <a href='{event.get('htmlLink')}' target='_blank'>Ver en Google Calendar</a>"
+    created = service.events().insert(calendarId='primary', body=event).execute()
+    return jsonify({
+        "message": "Evento creado",
+        "link": created.get('htmlLink')
+    })
 
-    return render_template_string(formulario_html)
+# 2. Leer agenda
+@app.route('/leer_agenda', methods=['GET'])
+def leer_agenda():
+    rango = request.args.get('rango')  # diario, semanal, mensual
+    ahora = datetime.utcnow()
+    
+    if rango == "diario":
+        inicio = ahora
+        fin = ahora + timedelta(days=1)
+    elif rango == "semanal":
+        inicio = ahora
+        fin = ahora + timedelta(days=7)
+    elif rango == "mensual":
+        inicio = ahora
+        fin = ahora + timedelta(days=30)
+    else:
+        return jsonify({"error": "Rango inválido"}), 400
 
-# ENDPOINT API PARA GPT
-@app.route('/api/crear_evento', methods=['POST'])
-def api_crear_evento():
-    data = request.get_json()
-    summary = data.get('summary')
-    start = data.get('start')
-    end = data.get('end')
-
-    try:
-        event = {
-            'summary': summary,
-            'start': {'dateTime': start, 'timeZone': 'America/Panama'},
-            'end': {'dateTime': end, 'timeZone': 'America/Panama'}
-        }
-        event = service.events().insert(calendarId='primary', body=event).execute()
-        return jsonify({'message': 'Evento creado', 'link': event.get('htmlLink')}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
-
-@app.route('/api/eventos', methods=['GET'])
-def api_eventos():
-    start = request.args.get('start')  # ISO 8601
-    end = request.args.get('end')
-
-    events_result = service.events().list(
+    eventos = service.events().list(
         calendarId='primary',
-        timeMin=start,
-        timeMax=end,
+        timeMin=inicio.isoformat() + 'Z',
+        timeMax=fin.isoformat() + 'Z',
         singleEvents=True,
         orderBy='startTime'
-    ).execute()
+    ).execute().get('items', [])
 
-    return jsonify(events_result.get('items', [])), 200
+    resultado = []
+    for evento in eventos:
+        resultado.append({
+            "id": evento['id'],
+            "titulo": evento.get('summary', 'Sin título'),
+            "inicio": evento['start'].get('dateTime'),
+            "fin": evento['end'].get('dateTime'),
+        })
 
-@app.route('/api/conflicto', methods=['POST'])
-def api_conflicto():
-    data = request.get_json()
-    start = data.get('start')
-    end = data.get('end')
+    return jsonify(resultado)
 
-    events_result = service.events().list(
+# 3. Eliminar evento
+@app.route('/eliminar_evento/<id_evento>', methods=['DELETE'])
+def eliminar_evento(id_evento):
+    service.events().delete(calendarId='primary', eventId=id_evento).execute()
+    return jsonify({"message": "Evento eliminado"})
+
+# 4. Modificar evento
+@app.route('/modificar_evento/<id_evento>', methods=['PATCH'])
+def modificar_evento(id_evento):
+    data = request.json
+    event = service.events().get(calendarId='primary', eventId=id_evento).execute()
+
+    if 'summary' in data:
+        event['summary'] = data['summary']
+    if 'start' in data:
+        event['start']['dateTime'] = datetime.strptime(data['start'], "%Y-%m-%d %H:%M").isoformat()
+    if 'end' in data:
+        event['end']['dateTime'] = datetime.strptime(data['end'], "%Y-%m-%d %H:%M").isoformat()
+
+    updated_event = service.events().update(calendarId='primary', eventId=id_evento, body=event).execute()
+    return jsonify({"message": "Evento modificado", "link": updated_event.get('htmlLink')})
+
+# 5. Sugerir horario disponible
+@app.route('/sugerir_horario', methods=['GET'])
+def sugerir_horario():
+    duracion = int(request.args.get('duracion', 30))  # en minutos
+    ahora = datetime.utcnow()
+    fin = ahora + timedelta(days=1)
+
+    eventos = service.events().list(
         calendarId='primary',
-        timeMin=start,
-        timeMax=end,
+        timeMin=ahora.isoformat() + 'Z',
+        timeMax=fin.isoformat() + 'Z',
         singleEvents=True,
         orderBy='startTime'
-    ).execute()
+    ).execute().get('items', [])
 
-    conflictos = events_result.get('items', [])
-    if conflictos:
-        return jsonify({'conflict': True, 'events': conflictos}), 200
-    return jsonify({'conflict': False}), 200
+    bloque_inicio = ahora
+    for evento in eventos:
+        inicio_evento = datetime.fromisoformat(evento['start']['dateTime'])
+        if (inicio_evento - bloque_inicio).total_seconds() >= duracion * 60:
+            sugerencia = bloque_inicio.strftime("%Y-%m-%d %H:%M")
+            return jsonify({"sugerido": sugerencia})
+        bloque_inicio = datetime.fromisoformat(evento['end']['dateTime'])
 
-# Ejecutar servidor Flask (solo en local)
+    return jsonify({"mensaje": "No hay bloques disponibles en las próximas 24h"})
+
+# Ejecutar local
 if __name__ == '__main__':
     app.run(port=5001, debug=True)
